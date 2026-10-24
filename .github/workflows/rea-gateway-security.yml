@@ -1,0 +1,46 @@
+name: REA Gateway Security Checks
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/render/**'
+      - '.github/workflows/rea-gateway-security.yml'
+  push:
+    branches:
+      - 'feat/render-chatgpt-gateway-foundation'
+    paths:
+      - 'deploy/render/**'
+      - '.github/workflows/rea-gateway-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - name: Install security library
+        working-directory: deploy/render
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Syntax validation
+        run: |
+          node --check deploy/render/gateway.mjs
+          node --check deploy/render/gateway.test.mjs
+          node --check deploy/render/security-policy.mjs
+          node --check deploy/render/security-policy.test.mjs
+          node --check deploy/render/oauth-config.mjs
+          node --check deploy/render/oauth-config.test.mjs
+          node --check deploy/render/oauth-gateway.test.mjs
+          node --check deploy/render/token-verifier.mjs
+          node --check deploy/render/token-verifier.test.mjs
+      - name: Fail-closed gateway and tool policy tests
+        working-directory: deploy/render
+        run: npm test
