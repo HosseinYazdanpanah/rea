@@ -9,11 +9,15 @@ const REA_PORT = 8765;
 const MAX_WAIT_MS = 700;
 
 function response(res, code, value, type = 'application/json; charset=utf-8') {
+  res.shouldKeepAlive = false;
   res.writeHead(code, {
     'content-type': type,
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
     'content-security-policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    connection: 'close',
   });
   res.end(value);
 }
@@ -21,13 +25,13 @@ function response(res, code, value, type = 'application/json; charset=utf-8') {
 export function probeLoopback(port = REA_PORT) {
   return new Promise((resolveProbe) => {
     let settled = false;
+    const socket = createConnection({ host: REA_HOST, port });
     const finish = (reachable) => {
       if (settled) return;
       settled = true;
       socket.destroy();
       resolveProbe(reachable);
     };
-    const socket = createConnection({ host: REA_HOST, port });
     socket.setTimeout(MAX_WAIT_MS);
     socket.once('connect', () => finish(true));
     socket.once('timeout', () => finish(false));
@@ -37,7 +41,13 @@ export function probeLoopback(port = REA_PORT) {
 
 export function createGatewayHandler({ engineProbe = probeLoopback } = {}) {
   return async (req, res) => {
-    const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+    let pathname;
+    try {
+      pathname = new URL(req.url || '/', 'http://localhost').pathname;
+    } catch {
+      response(res, 400, JSON.stringify({ error: 'bad_request' }));
+      return;
+    }
     if (pathname === '/mcp' || pathname.startsWith('/mcp/')) {
       // A gateway without verified OAuth MUST NOT forward a REA request.
       response(res, 503, JSON.stringify({
@@ -59,6 +69,10 @@ export function createGatewayHandler({ engineProbe = probeLoopback } = {}) {
       response(res, 200, '<!doctype html><html lang="en"><meta charset="utf-8"><title>REA Gateway</title><body><h1>REA Gateway</h1><p>Secure MCP access is not configured. Tools are not publicly available.</p></body></html>', 'text/html; charset=utf-8');
       return;
     }
+    if (pathname === '/' || pathname === '/healthz') {
+      response(res, 405, JSON.stringify({ error: 'method_not_allowed' }));
+      return;
+    }
     response(res, 404, JSON.stringify({ error: 'not_found' }));
   };
 }
@@ -72,9 +86,13 @@ export function boot() {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, REA_LOG_LEVEL: 'silent' },
   });
-  rea.stderr.on('data', () => { /* Do not echo diagnostic details publicly. */ });
-  rea.on('error', () => { /* Health remains unavailable on startup failure. */ });
-  const server = createServer(createGatewayHandler());
+  rea.stderr.on('data', () => { /* Never return raw REA logs to unauthenticated clients. */ });
+  rea.on('error', () => { /* Health remains unavailable on REA startup failure. */ });
+  const server = createServer({ maxHeaderSize: 8192 }, createGatewayHandler());
+  server.headersTimeout = 7_000;
+  server.requestTimeout = 10_000;
+  server.keepAliveTimeout = 4_000;
+  server.maxRequestsPerSocket = 32;
   server.listen(port, '0.0.0.0', () => {
     process.stdout.write(`Gateway listening on port ${port}; MCP disabled pending OAuth.\n`);
   });
