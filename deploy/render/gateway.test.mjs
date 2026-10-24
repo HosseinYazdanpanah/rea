@@ -29,7 +29,7 @@ test('MCP is always inaccessible without verified OAuth, including tools calls',
 test('health reports local engine readiness and disabled MCP separately', async () => {
   const healthy = await request('/healthz', {}, true);
   assert.equal(healthy.status, 200);
-  assert.equal(JSON.parse(healthy.body).mcp, 'disabled_pending_auth');
+  assert.equal(JSON.parse(healthy.body).mcp, 'disabled_pending_tool_sandbox');
   const unhealthy = await request('/healthz', {}, false);
   assert.equal(unhealthy.status, 503);
 });
