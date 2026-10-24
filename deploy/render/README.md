@@ -1,6 +1,15 @@
-# REA MCP on Render: secure foundation (phase 1)
+# REA MCP on Render: secure foundation (phases 1–2)
 
 This is a **preparatory, fail-closed deployment**, NOT a working ChatGPT MCP connector.
+
+
+## Phase 2 security design and automated checks
+
+- [Security architecture, trust boundaries and deployment gates](SECURITY-ARCHITECTURE.md)
+- [Default-deny tool authorization policy](security-policy.mjs) (not yet wired to an authenticated proxy)
+- [GitHub Actions test workflow](../../.github/workflows/rea-gateway-security.yml)
+- Verify locally with `node --test gateway.test.mjs security-policy.test.mjs` from this folder.
+- Do **not** publish an operational MCP endpoint yet: external `/mcp` intentionally returns HTTP 503.
 
 ## What it does
 
