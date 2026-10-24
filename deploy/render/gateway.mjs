@@ -3,12 +3,13 @@ import { createConnection } from 'node:net';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { readOAuthConfiguration, oauthResourceMetadata, oauthChallenge } from './oauth-config.mjs';
 
 const REA_HOST = '127.0.0.1';
 const REA_PORT = 8765;
 const MAX_WAIT_MS = 700;
 
-function response(res, code, value, type = 'application/json; charset=utf-8') {
+function response(res, code, value, type = 'application/json; charset=utf-8', headers = {}) {
   res.shouldKeepAlive = false;
   res.writeHead(code, {
     'content-type': type,
@@ -18,6 +19,7 @@ function response(res, code, value, type = 'application/json; charset=utf-8') {
     'referrer-policy': 'no-referrer',
     'content-security-policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
     connection: 'close',
+    ...headers,
   });
   res.end(value);
 }
@@ -39,7 +41,7 @@ export function probeLoopback(port = REA_PORT) {
   });
 }
 
-export function createGatewayHandler({ engineProbe = probeLoopback } = {}) {
+export function createGatewayHandler({ engineProbe = probeLoopback, oauth = readOAuthConfiguration(), verifyToken } = {}) {
   return async (req, res) => {
     let pathname;
     try {
@@ -48,11 +50,53 @@ export function createGatewayHandler({ engineProbe = probeLoopback } = {}) {
       response(res, 400, JSON.stringify({ error: 'bad_request' }));
       return;
     }
+    if (pathname === '/.well-known/oauth-protected-resource' || pathname === '/.well-known/oauth-protected-resource/mcp') {
+      if (req.method !== 'GET') {
+        response(res, 405, JSON.stringify({ error: 'method_not_allowed' }));
+        return;
+      }
+      if (!oauth.enabled) {
+        response(res, 503, JSON.stringify({ error: 'oauth_not_configured' }));
+        return;
+      }
+      response(res, 200, JSON.stringify(oauthResourceMetadata(oauth)));
+      return;
+    }
     if (pathname === '/mcp' || pathname.startsWith('/mcp/')) {
-      // A gateway without verified OAuth MUST NOT forward a REA request.
+      // OAuth is a prerequisite, never a grant to execute REA tools by itself.
+      if (!oauth.enabled) {
+        response(res, 503, JSON.stringify({ error: 'mcp_not_available', message: 'OAuth is not configured.' }));
+        return;
+      }
+      if (typeof verifyToken !== 'function') {
+        response(res, 503, JSON.stringify({ error: 'mcp_not_available', message: 'Token verification is unavailable.' }));
+        return;
+      }
+      const auth = req.headers.authorization ?? '';
+      const bearer = /^Bearer ([A-Za-z0-9._-]+)$/.exec(auth);
+      if (!bearer || bearer[1].length > 12_000) {
+        response(res, 401, JSON.stringify({ error: 'unauthorized' }), undefined, {
+          'www-authenticate': oauthChallenge(oauth),
+        });
+        return;
+      }
+      let verified;
+      try {
+        verified = await verifyToken(bearer[1]);
+      } catch {
+        verified = { ok: false, reason: 'invalid_token' };
+      }
+      if (verified?.ok !== true) {
+        const insufficient = verified?.reason === 'insufficient_scope' || verified?.reason === 'forbidden_user';
+        response(res, insufficient ? 403 : 401, JSON.stringify({ error: insufficient ? 'forbidden' : 'unauthorized' }), undefined, {
+          'www-authenticate': oauthChallenge(oauth, insufficient ? 'insufficient_scope' : 'invalid_token'),
+        });
+        return;
+      }
+      // Phase 3: even an authenticated and scoped caller cannot access REA yet.
       response(res, 503, JSON.stringify({
         error: 'mcp_not_available',
-        message: 'MCP is disabled until OAuth and tool authorization are verified.',
+        message: 'Authenticated; upstream tools remain disabled until isolated proxy verification.',
       }));
       return;
     }
@@ -61,7 +105,8 @@ export function createGatewayHandler({ engineProbe = probeLoopback } = {}) {
       response(res, engineListening ? 200 : 503, JSON.stringify({
         gateway: 'online',
         engine: engineListening ? 'loopback_listener_detected' : 'unavailable',
-        mcp: 'disabled_pending_auth',
+        mcp: 'disabled_pending_tool_sandbox',
+        oauth: oauth.enabled ? 'configured' : 'not_configured',
       }));
       return;
     }
@@ -88,7 +133,17 @@ export function boot() {
   });
   rea.stderr.on('data', () => { /* Never return raw REA logs to unauthenticated clients. */ });
   rea.on('error', () => { /* Health remains unavailable on REA startup failure. */ });
-  const server = createServer({ maxHeaderSize: 8192 }, createGatewayHandler());
+  const oauth = readOAuthConfiguration();
+  const tokenVerification = oauth.enabled
+    ? import('./token-verifier.mjs').then(({ createBearerVerifier }) => createBearerVerifier(oauth)).catch(() => null)
+    : Promise.resolve(null);
+  const server = createServer({ maxHeaderSize: 8192 }, createGatewayHandler({
+    oauth,
+    verifyToken: async (token) => {
+      const verifier = await tokenVerification;
+      return verifier ? verifier(token) : { ok: false, reason: 'invalid_token' };
+    },
+  }));
   server.headersTimeout = 7_000;
   server.requestTimeout = 10_000;
   server.keepAliveTimeout = 4_000;
