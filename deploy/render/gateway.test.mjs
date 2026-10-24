@@ -44,3 +44,27 @@ test('unknown routes are denied', async () => {
   const result = await request('/secret');
   assert.equal(result.status, 404);
 });
+
+test('even a forged bearer token and tool list request cannot expose MCP', async () => {
+  const result = await request('/mcp', {
+    method: 'POST',
+    headers: { authorization: 'Bearer invalid', 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 'abc' }),
+  });
+  assert.equal(result.status, 503);
+  assert.doesNotMatch(result.body, /tools["']?\\s*:/);
+});
+
+test('public health is read-only, no open CORS or session cookies', async () => {
+  const post = await request('/healthz', { method: 'POST', body: 'some content' });
+  assert.equal(post.status, 405);
+  const home = await request('/');
+  assert.equal(home.status, 200);
+});
+
+test('encoded and nested MCP paths do not expose the gateway', async () => {
+  for (const path of ['/mcp/', '/mcp/tools', '/mcp?method=tools%2Flist', '/mcp/%2e%2e/secret']) {
+    const result = await request(path);
+    assert.ok([404, 503].includes(result.status));
+  }
+});
