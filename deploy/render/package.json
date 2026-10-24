@@ -1,0 +1,16 @@
+{
+  "name": "rea-gateway-render-adapter",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "jose": "6.2.12"
+  },
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "start": "node gateway.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
