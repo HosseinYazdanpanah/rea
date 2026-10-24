@@ -27,12 +27,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'
+      - name: Install security library
+        working-directory: deploy/render
+        run: npm install --ignore-scripts --no-audit --no-fund
       - name: Syntax validation
         run: |
           node --check deploy/render/gateway.mjs
           node --check deploy/render/gateway.test.mjs
           node --check deploy/render/security-policy.mjs
           node --check deploy/render/security-policy.test.mjs
+          node --check deploy/render/oauth-config.mjs
+          node --check deploy/render/oauth-config.test.mjs
+          node --check deploy/render/oauth-gateway.test.mjs
+          node --check deploy/render/token-verifier.mjs
+          node --check deploy/render/token-verifier.test.mjs
       - name: Fail-closed gateway and tool policy tests
         working-directory: deploy/render
-        run: node --test gateway.test.mjs security-policy.test.mjs
+        run: npm test
