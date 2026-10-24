@@ -1,7 +1,16 @@
-# REA MCP on Render: secure foundation (phases 1–2)
+# REA MCP on Render: secure foundation (phases 1–3)
 
 This is a **preparatory, fail-closed deployment**, NOT a working ChatGPT MCP connector.
 
+
+## Phase 3: OAuth resource-server verification (in progress)
+
+- [Persian Auth0 dashboard onboarding guide](AUTH0-SETUP-FA.md)
+- Strict HTTPS OAuth configuration in `oauth-config.mjs`; public protected-resource metadata only when configured.
+- Access tokens checked using `jose` against Auth0 JWKS, issuer, audience, expiry, user allowlist and `rea:inspect` scope.
+- Anonymous/invalid token challenges, insufficient-scope and unauthorized-user denial; unit tests include real RS256 signed JWT verification in GitHub Actions.
+- **Even a verified user cannot invoke REA yet**: `/mcp` returns HTTP 503 until process isolation, tool authorization and integration tests are finished.
+- Do not set environment values or expose a service publicly until the Render URL and Auth0 API Identifier match and the user authorizes deployment.
 
 ## Phase 2 security design and automated checks
 
